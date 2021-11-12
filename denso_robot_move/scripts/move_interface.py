@@ -2,8 +2,8 @@ from __future__ import print_function
 
 # from six.moves import input
 
+import time
 import sys
-import copy
 import rospy
 import moveit_commander
 import moveit_msgs.msg
@@ -114,23 +114,16 @@ class GripperNTLab(object):
         self.gripper_pub = gripper_pub
         self.finger_torque = [0, 0]
 
-    def cobottaExecutePoseGoal(self, position):
+    def cobottaExecutePoseGoal(self, position, wait):
 
         move_group = self.move_group
 
-        pose_goal = geometry_msgs.msg.Pose()
-        pose_goal.position.x = position[0]
-        pose_goal.position.y = position[1]
-        pose_goal.position.z = position[2]
-        pose_goal.orientation.w = position[3]
-        pose_goal.orientation.x = position[4]
-        pose_goal.orientation.y = position[5]
-        pose_goal.orientation.z = position[6]
+        pose_goal = arrayToPose(position)
 
         move_group.set_pose_target(pose_goal)
 
         # call planner to execute
-        plan = move_group.go(wait=True)
+        move_group.go(wait=wait)
         # Calling `stop()` ensures that there is no residual movement
         move_group.stop()
         # It is always good to clear your targets after planning with poses.
@@ -139,6 +132,15 @@ class GripperNTLab(object):
 
         current_pose = self.move_group.get_current_pose().pose
         return allClose(pose_goal, current_pose, 0.01)
+
+    def cobottaWaitExecution(self, position, timeout):  # timeout in (s)
+        start = time.time()
+        ret = False
+        while time.time() < start + timeout and not ret:
+            current_pose = self.move_group.get_current_pose().pose
+            ret = allClose(position, current_pose, 0.01)
+            rospy.sleep(0.01)
+        return ret
 
     def jointStateCallback(self, data):
         i = 0
@@ -205,14 +207,27 @@ def toArray(param):
     return ret
 
 
+def arrayToPose(position):
+    pose_goal = geometry_msgs.msg.Pose()
+    pose_goal.position.x = position[0]
+    pose_goal.position.y = position[1]
+    pose_goal.position.z = position[2]
+    pose_goal.orientation.w = position[3]
+    pose_goal.orientation.x = position[4]
+    pose_goal.orientation.y = position[5]
+    pose_goal.orientation.z = position[6]
+    return pose_goal
+
+
 def main():
     try:
         print(sys.version)
         print("Move Interface")
         input("Press 'Enter' to start.")  # initialize
+
         ntlab = GripperNTLab()
         print(toArray(ntlab.gripper_pose))
-        input("Press 'Enter' to start.")  # standby
+        # rospy.sleep(0.5)  # input("Press 'Enter' to start.")  # standby
         position = [
             0.00206299,
             0.148964,
@@ -222,14 +237,14 @@ def main():
             0.664963,
             0.00219526,
         ]
-        ntlab.cobottaExecutePoseGoal(position)
+        ntlab.cobottaExecutePoseGoal(position, True)
 
-        input("Press 'Enter' to next.")
+        # rospy.sleep(0.5)  # input("Press 'Enter' to next.")
         gripper_pos = [0.22, -0.05, 0.22, 0.046, 0]
-        ntlab.gripperSetPose(gripper_pos, 2)
+        ntlab.gripperSetPose(gripper_pos, 3)
         ntlab.gripperExecute()
 
-        input("Press 'Enter' to next.")  # grip
+        # rospy.sleep(0.5) # grip
         position = [
             0.00252282,
             0.149731,
@@ -239,12 +254,12 @@ def main():
             0.665024,
             0.00213275,
         ]
-        ntlab.cobottaExecutePoseGoal(position)
+        ntlab.cobottaExecutePoseGoal(position, True)
 
-        input("Press 'Enter' to next.")
+        # rospy.sleep(0.5)
         ntlab.gripperGripLimitTorque()
 
-        input("Press 'Enter' to next.")  # rotate
+        # rospy.sleep(0.5) # rotate
         position = [
             -0.00295548,
             0.188509,
@@ -254,15 +269,17 @@ def main():
             0.665025,
             0.00229287,
         ]
-        ntlab.cobottaExecutePoseGoal(position)
 
-        input("Press 'Enter' to next.")  # current pos + rotate
+        ntlab.cobottaExecutePoseGoal(position, False)
+
+        rospy.sleep(1.5)  # current pos + rotate
         gripper_pos = toArray(ntlab.gripper_pose)
         gripper_pos[4] = 3.14  # rotate
-        ntlab.gripperSetPose(gripper_pos, 2)
+        ntlab.gripperSetPose(gripper_pos, 10)
         ntlab.gripperExecute()
+        ntlab.cobottaWaitExecution(arrayToPose(position), 10)
 
-        input("Press 'Enter' to next.")  # place
+        rospy.sleep(0.5)  # place
         position = [
             0.00475795,
             0.260686,
@@ -272,16 +289,38 @@ def main():
             0.664991,
             0.00225271,
         ]
-        ntlab.cobottaExecutePoseGoal(position)
+        ntlab.cobottaExecutePoseGoal(position, True)
 
-        input("Press 'Enter' to next.")  # current pos + open slightly + finger up todo
+        # current pos + open slightly + finger up todo
+
+        # slightly open
         gripper_pos = toArray(ntlab.gripper_pose)
         gripper_pos[1] -= 0.01
         gripper_pos[3] += 0.01
-        ntlab.gripperSetPose(gripper_pos, 2)
+        ntlab.gripperSetPose(gripper_pos, 3)
         ntlab.gripperExecute()
 
-        input("Press 'Enter' to start.")  # standby
+        rospy.sleep(0.5)
+        # finger slightly up
+        # gripper_pos = toArray(ntlab.gripper_pose)
+        # gripper_pos[0] -= 0.02
+        # gripper_pos[2] -= 0.02
+        # ntlab.gripperSetPose(gripper_pos, 2)
+        # ntlab.gripperExecute()
+
+        # or arm going up
+        position = [
+            0.00475795,
+            0.260686,
+            0.360046,
+            0.0121942,
+            -0.746748,
+            0.664991,
+            0.00225271,
+        ]
+        ntlab.cobottaExecutePoseGoal(position, True)
+
+        # rospy.sleep(0.5) # standby
         ntlab = GripperNTLab()
         position = [
             0.00206299,
@@ -292,12 +331,13 @@ def main():
             0.664963,
             0.00219526,
         ]
-        ntlab.cobottaExecutePoseGoal(position)
+        ntlab.cobottaExecutePoseGoal(position, False)
 
-        input("Press 'Enter' to next.")  # standby
+        rospy.sleep(1)  # standby
         gripper_pos = [0.19, -0.06, 0.19, 0.06, 0]
-        ntlab.gripperSetPose(gripper_pos, 2)
+        ntlab.gripperSetPose(gripper_pos, 3)
         ntlab.gripperExecute()
+        ntlab.cobottaWaitExecution(arrayToPose(position), 10)
 
         input("Press 'Enter' to end.")
 
