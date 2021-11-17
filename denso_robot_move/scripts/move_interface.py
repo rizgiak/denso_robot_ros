@@ -1,7 +1,5 @@
 from __future__ import print_function
 
-# from six.moves import input
-
 import time
 import sys
 import rospy
@@ -13,9 +11,12 @@ from sensor_msgs.msg import JointState
 from gripper_ntlab_controller.msg import CartesianPosition
 from math import pi, tau, dist, fabs, cos
 from moveit_commander.conversions import pose_to_list
+from tf.transformations import euler_from_quaternion, quaternion_from_euler
+
+hand_offset_z = 0.030  # in meter
 
 
-def allClose(goal, actual, tolerance):
+def all_close(goal, actual, tolerance):
     """
     Convenience method for testing if the values in two lists are within a tolerance of each other.
     For Pose and PoseStamped inputs, the angle between the two quaternions is compared (the angle
@@ -31,7 +32,7 @@ def allClose(goal, actual, tolerance):
                 return False
 
     elif type(goal) is geometry_msgs.msg.PoseStamped:
-        return allClose(goal.pose, actual.pose, tolerance)
+        return all_close(goal.pose, actual.pose, tolerance)
 
     elif type(goal) is geometry_msgs.msg.Pose:
         x0, y0, z0, qx0, qy0, qz0, qw0 = pose_to_list(actual)
@@ -41,6 +42,13 @@ def allClose(goal, actual, tolerance):
         # phi = angle between orientations
         cos_phi_half = fabs(qx0 * qx1 + qy0 * qy1 + qz0 * qz1 + qw0 * qw1)
         return d <= tolerance and cos_phi_half >= cos(tolerance / 2.0)
+    elif type(goal) is CartesianPosition:
+        ax1, ay1, ax2, ay2, arad = to_list(actual)
+        gx1, gy1, gx2, gy2, grad = to_list(goal)
+        d1 = dist((ax1, ay1), (gx1, gy1))
+        d2 = dist((ax2, ay2), (gx2, gy2))
+        dist_angle = fabs(arad - grad)
+        return d1 <= tolerance and d2 <= tolerance and dist_angle <= tolerance
 
     return True
 
@@ -48,6 +56,7 @@ def allClose(goal, actual, tolerance):
 class GripperNTLab(object):
 
     gripper_pose = CartesianPosition()
+    current_gripper_pose = CartesianPosition()
 
     def __init__(self) -> None:
 
@@ -63,12 +72,12 @@ class GripperNTLab(object):
 
         # Subscriber ----
         rospy.Subscriber(
-            "cobotta/all_joint_states", JointState, self.jointStateCallback
+            "cobotta/all_joint_states", JointState, self.joint_state_callback
         )
         rospy.Subscriber(
             "gripper_ntlab/cartesian_position",
             CartesianPosition,
-            self.gripperCartesianPositionCallback,
+            self.gripper_cartesian_position_callback,
         )
 
         robot = moveit_commander.RobotCommander()
@@ -77,8 +86,8 @@ class GripperNTLab(object):
         group_name = "arm"
         move_group = moveit_commander.MoveGroupCommander(group_name)
 
-        move_group.set_max_velocity_scaling_factor(0.7)
-        move_group.set_max_acceleration_scaling_factor(0.7)
+        move_group.set_max_velocity_scaling_factor(0.9)
+        move_group.set_max_acceleration_scaling_factor(0.9)
 
         display_trajectory_publisher = rospy.Publisher(
             "/move_group/display_planned_path",
@@ -114,11 +123,11 @@ class GripperNTLab(object):
         self.gripper_pub = gripper_pub
         self.finger_torque = [0, 0]
 
-    def cobottaExecutePoseGoal(self, position, wait):
+    def cobotta_execute_pose_goal(self, position, wait):
 
         move_group = self.move_group
 
-        pose_goal = arrayToPose(position)
+        pose_goal = list_to_pose(position)
 
         move_group.set_pose_target(pose_goal)
 
@@ -131,18 +140,28 @@ class GripperNTLab(object):
         move_group.clear_pose_targets()
 
         current_pose = self.move_group.get_current_pose().pose
-        return allClose(pose_goal, current_pose, 0.01)
+        return all_close(pose_goal, current_pose, 0.01)
 
-    def cobottaWaitExecution(self, position, timeout):  # timeout in (s)
+    def cobotta_wait_execution(self, position, timeout):  # timeout in (s)
         start = time.time()
         ret = False
         while time.time() < start + timeout and not ret:
             current_pose = self.move_group.get_current_pose().pose
-            ret = allClose(position, current_pose, 0.01)
+            ret = all_close(position, current_pose, 0.01)
             rospy.sleep(0.01)
         return ret
 
-    def jointStateCallback(self, data):
+    def gripper_execute_and_wait(self, position, timeout):  # timeout in (s)
+        start = time.time()
+        ret = False
+        while time.time() < start + timeout and not ret:
+            self.gripper_execute()
+            current_pose = self.current_gripper_pose
+            ret = all_close(list_to_cartesian_position(position), current_pose, 0.01)
+            rospy.sleep(0.2)
+        return ret
+
+    def joint_state_callback(self, data):
         i = 0
         f1, f2 = (0, 0)
         for t in data.name:
@@ -155,15 +174,15 @@ class GripperNTLab(object):
         self.finger_torque = [f1, f2]
 
     # x1, y1, theta1, x2, y2, theta2
-    def gripperCartesianPositionCallback(self, data):
-        self.gripper_pose.x1 = data.x1
-        self.gripper_pose.y1 = data.y1
-        self.gripper_pose.x2 = data.x2
-        self.gripper_pose.y2 = data.y2
-        self.gripper_pose.rad = data.rad
-        # print("gripperCartesianPositionCallback: %s" % self.gripper_pose)
+    def gripper_cartesian_position_callback(self, data):
+        self.current_gripper_pose.x1 = data.x1
+        self.current_gripper_pose.y1 = data.y1
+        self.current_gripper_pose.x2 = data.x2
+        self.current_gripper_pose.y2 = data.y2
+        self.current_gripper_pose.rad = data.rad
+        # print("gripper_cartesian_position_callback: %s" % self.current_gripper_pose)
 
-    def gripperSetPose(self, position, buffer):
+    def gripper_set_pose(self, position, buffer):
         self.gripper_pose.x1 = position[0]
         self.gripper_pose.y1 = position[1]
         self.gripper_pose.x2 = position[2]
@@ -172,14 +191,14 @@ class GripperNTLab(object):
         self.gripper_pose.buffer = buffer
         self.gripper_pose.torque = True
 
-    def gripperExecute(self):
+    def gripper_execute(self):
         gripper_pub = self.gripper_pub
         gripper_pub.publish(self.gripper_pose)
 
-    def gripperGripLimitTorque(self):
-        limit_torque = 0.035
-        gripper_position = toArray(self.gripper_pose)
-        print("f1:" + str(self.finger_torque[0]) + ", f2:" + str(self.finger_torque[1]))
+    def gripper_grip_limit_torque(self):
+        limit_torque = 0.025
+        gripper_position = to_list(self.current_gripper_pose)
+        # print("f1:" + str(self.finger_torque[0]) + ", f2:" + str(self.finger_torque[1]))
         while (
             self.finger_torque[0] <= limit_torque
             and self.finger_torque[0] >= -limit_torque
@@ -188,36 +207,88 @@ class GripperNTLab(object):
         ):
             gripper_position[1] += 0.0001
             gripper_position[3] -= 0.0001
-            self.gripperSetPose(gripper_position, 0)
-            self.gripperExecute()
-            print(
-                "res f1:"
-                + str(self.finger_torque[0])
-                + ", f2:"
-                + str(self.finger_torque[1])
-            )
+            self.gripper_set_pose(gripper_position, 0)
+            self.gripper_execute()
+            # print(
+            #     "res f1:"
+            #     + str(self.finger_torque[0])
+            #     + ", f2:"
+            #     + str(self.finger_torque[1])
+            # )
             rospy.sleep(0.01)
 
 
-def toArray(param):
+def to_list(param):
     if type(param) == type(CartesianPosition()):
-        ret = [param.x1, param.y1, param.x2, param.y2, param.rad]
+        ret = []
+        ret.append(param.x1)
+        ret.append(param.y1)
+        ret.append(param.x2)
+        ret.append(param.y2)
+        ret.append(param.rad)
     else:
         ret = [0]
     return ret
 
 
-def arrayToPose(position):
+def generate_pose(x, y, z, ox, oy, oz, ow):
     pose_goal = geometry_msgs.msg.Pose()
-    pose_goal.position.x = position[0]
-    pose_goal.position.y = position[1]
-    pose_goal.position.z = position[2]
-    pose_goal.orientation.w = position[3]
-    pose_goal.orientation.x = position[4]
-    pose_goal.orientation.y = position[5]
-    pose_goal.orientation.z = position[6]
+    pose_goal.position.x = x
+    pose_goal.position.y = y
+    pose_goal.position.z = z
+    pose_goal.orientation.x = ox
+    pose_goal.orientation.y = oy
+    pose_goal.orientation.z = oz
+    pose_goal.orientation.w = ow
     return pose_goal
 
+
+def list_to_pose(param):
+    if len(param) == 7:
+        return generate_pose(
+            param[0],
+            param[1],
+            param[2],
+            param[3],
+            param[4],
+            param[5],
+            param[6],
+        )
+    else:
+        print("ERROR: Size of array not fit.")
+        return generate_pose(0, 0, 0, 0, 0, 0, 0)
+
+
+def list_to_cartesian_position(param):
+    ret = CartesianPosition()
+    ret.x1, ret.y1, ret.x2, ret.y2, ret.rad = param
+    return ret
+
+
+def euler_from_pose(param):
+    quaternion_list = [
+        param.orientation.x,
+        param.orientation.y,
+        param.orientation.z,
+        param.orientation.w,
+    ]
+    return euler_from_quaternion(quaternion_list)
+
+
+def euler_from_pose(param):
+    quaternion_list = [
+        param.orientation.x,
+        param.orientation.y,
+        param.orientation.z,
+        param.orientation.w,
+    ]
+    return euler_from_quaternion(quaternion_list)
+
+def rad_to_deg(rad):
+    return rad * 180 / pi
+
+def deg_to_rad(deg):
+    return deg * (pi / 180)
 
 def main():
     try:
@@ -225,84 +296,101 @@ def main():
         print("Move Interface")
         input("Press 'Enter' to start.")  # initialize
 
+        # Orientation set
+        (ox, oy, oz, ow) = quaternion_from_euler(deg_to_rad(-180), deg_to_rad(0), deg_to_rad(-90))
+
         ntlab = GripperNTLab()
-        print(toArray(ntlab.gripper_pose))
+        print(to_list(ntlab.current_gripper_pose))
         # rospy.sleep(0.5)  # input("Press 'Enter' to start.")  # standby
         position = [
             0.00206299,
             0.148964,
             0.372349,
-            0.0123763,
-            -0.74677,
-            0.664963,
-            0.00219526,
+            ox,
+            oy,
+            oz,
+            ow,
         ]
-        ntlab.cobottaExecutePoseGoal(position, True)
+        ntlab.cobotta_execute_pose_goal(position, True)
+        (roll, pitch, yaw) = euler_from_pose(ntlab.move_group.get_current_pose().pose)
+        print("roll:" + str(rad_to_deg(roll)) + " pitch:" + str(rad_to_deg(pitch)) + " yaw:" + str(rad_to_deg(yaw)))
 
         # rospy.sleep(0.5)  # input("Press 'Enter' to next.")
-        gripper_pos = [0.22, -0.05, 0.22, 0.046, 0]
-        ntlab.gripperSetPose(gripper_pos, 3)
-        ntlab.gripperExecute()
-
+        gripper_pos = [0.22, -0.045, 0.22, 0.045, 0]
+        ntlab.gripper_set_pose(gripper_pos, 3)
+        # ntlab.gripperExecute()
+        ntlab.gripper_execute_and_wait(gripper_pos, 10)
+        print("standby z:" + str(position[2] + gripper_pos[0] + hand_offset_z))
         # rospy.sleep(0.5) # grip
         position = [
-            0.00252282,
-            0.149731,
-            0.33767,
-            0.0123818,
-            -0.746716,
-            0.665024,
-            0.00213275,
+            0.00242663,
+            0.149709,
+            0.337611,
+            ox,
+            oy,
+            oz,
+            ow,
         ]
-        ntlab.cobottaExecutePoseGoal(position, True)
+        ntlab.cobotta_execute_pose_goal(position, True)
+        (roll, pitch, yaw) = euler_from_pose(ntlab.move_group.get_current_pose().pose)
+        print("roll:" + str(rad_to_deg(roll)) + " pitch:" + str(rad_to_deg(pitch)) + " yaw:" + str(rad_to_deg(yaw)))
 
         # rospy.sleep(0.5)
-        ntlab.gripperGripLimitTorque()
+        ntlab.gripper_grip_limit_torque()
+
+        while(1):
+            rospy.sleep(1)
 
         # rospy.sleep(0.5) # rotate
         position = [
             -0.00295548,
             0.188509,
             0.401929,
-            0.0123125,
-            -0.746716,
-            0.665025,
-            0.00229287,
+            ox,
+            oy,
+            oz,
+            ow,
         ]
 
-        ntlab.cobottaExecutePoseGoal(position, False)
+        ntlab.cobotta_execute_pose_goal(position, False)
 
         rospy.sleep(1.5)  # current pos + rotate
-        gripper_pos = toArray(ntlab.gripper_pose)
+        gripper_pos = to_list(ntlab.current_gripper_pose)
         gripper_pos[4] = 3.14  # rotate
-        ntlab.gripperSetPose(gripper_pos, 10)
-        ntlab.gripperExecute()
-        ntlab.cobottaWaitExecution(arrayToPose(position), 10)
+        ntlab.gripper_set_pose(gripper_pos, 10)
+        # ntlab.gripperExecute()
+        ntlab.gripper_execute_and_wait(gripper_pos, 10)
+        ntlab.cobotta_wait_execution(list_to_pose(position), 10)
+        (roll, pitch, yaw) = euler_from_pose(ntlab.move_group.get_current_pose().pose)
+        print("roll:" + str(rad_to_deg(roll)) + " pitch:" + str(rad_to_deg(pitch)) + " yaw:" + str(rad_to_deg(yaw)))
 
         rospy.sleep(0.5)  # place
         position = [
             0.00475795,
             0.260686,
             0.339046,
-            0.0121942,
-            -0.746748,
-            0.664991,
-            0.00225271,
+            ox,
+            oy,
+            oz,
+            ow,
         ]
-        ntlab.cobottaExecutePoseGoal(position, True)
+        ntlab.cobotta_execute_pose_goal(position, True)
+        (roll, pitch, yaw) = euler_from_pose(ntlab.move_group.get_current_pose().pose)
+        print("roll:" + str(rad_to_deg(roll)) + " pitch:" + str(rad_to_deg(pitch)) + " yaw:" + str(rad_to_deg(yaw)))
 
         # current pos + open slightly + finger up todo
 
         # slightly open
-        gripper_pos = toArray(ntlab.gripper_pose)
-        gripper_pos[1] -= 0.01
-        gripper_pos[3] += 0.01
-        ntlab.gripperSetPose(gripper_pos, 3)
-        ntlab.gripperExecute()
+        gripper_pos = to_list(ntlab.gripper_pose)
+        gripper_pos[1] -= 0.012
+        gripper_pos[3] += 0.012
+        ntlab.gripper_set_pose(gripper_pos, 3)
+        # ntlab.gripperExecute()
+        ntlab.gripper_execute_and_wait(gripper_pos, 10)
 
         rospy.sleep(0.5)
         # finger slightly up
-        # gripper_pos = toArray(ntlab.gripper_pose)
+        # gripper_pos = to_list(ntlab.gripper_pose)
         # gripper_pos[0] -= 0.02
         # gripper_pos[2] -= 0.02
         # ntlab.gripperSetPose(gripper_pos, 2)
@@ -313,31 +401,35 @@ def main():
             0.00475795,
             0.260686,
             0.360046,
-            0.0121942,
-            -0.746748,
-            0.664991,
-            0.00225271,
+            ox,
+            oy,
+            oz,
+            ow,
         ]
-        ntlab.cobottaExecutePoseGoal(position, True)
+        ntlab.cobotta_execute_pose_goal(position, True)
+        (roll, pitch, yaw) = euler_from_pose(ntlab.move_group.get_current_pose().pose)
+        print("roll:" + str(rad_to_deg(roll)) + " pitch:" + str(rad_to_deg(pitch)) + " yaw:" + str(rad_to_deg(yaw)))
 
         # rospy.sleep(0.5) # standby
-        ntlab = GripperNTLab()
         position = [
             0.00206299,
             0.148964,
             0.372349,
-            0.0123763,
-            -0.74677,
-            0.664963,
-            0.00219526,
+            ox,
+            oy,
+            oz,
+            ow,
         ]
-        ntlab.cobottaExecutePoseGoal(position, False)
+        ntlab.cobotta_execute_pose_goal(position, False)
 
         rospy.sleep(1)  # standby
         gripper_pos = [0.19, -0.06, 0.19, 0.06, 0]
-        ntlab.gripperSetPose(gripper_pos, 3)
-        ntlab.gripperExecute()
-        ntlab.cobottaWaitExecution(arrayToPose(position), 10)
+        ntlab.gripper_set_pose(gripper_pos, 3)
+        # ntlab.gripperExecute()
+        ntlab.gripper_execute_and_wait(gripper_pos, 10)
+        ntlab.cobotta_wait_execution(list_to_pose(position), 10)
+        (roll, pitch, yaw) = euler_from_pose(ntlab.move_group.get_current_pose().pose)
+        print("roll:" + str(rad_to_deg(roll)) + " pitch:" + str(rad_to_deg(pitch)) + " yaw:" + str(rad_to_deg(yaw)))
 
         input("Press 'Enter' to end.")
 
