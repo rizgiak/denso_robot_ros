@@ -13,7 +13,20 @@ from math import pi, tau, dist, fabs, cos
 from moveit_commander.conversions import pose_to_list
 from tf.transformations import euler_from_quaternion, quaternion_from_euler
 
+# define parameter ---------------------------------------------
+
+# Set as the actual object
+object_weight = 0.004 # in kg
+object_height = 0.05203 # in meter
+
 hand_offset_z = 0.030  # in meter
+limit_torque = 2 * object_weight + 0.019 # offset linear function
+
+# Set Input
+pick_position = [0.01072663, 0.155709, 0.337611]
+place_position = [0.01572663, 0.268686, 0.338046]
+
+################################################################
 
 
 def all_close(goal, actual, tolerance):
@@ -196,7 +209,6 @@ class GripperNTLab(object):
         gripper_pub.publish(self.gripper_pose)
 
     def gripper_grip_limit_torque(self):
-        limit_torque = 0.035
         gripper_position = to_list(self.current_gripper_pose)
         # print("f1:" + str(self.finger_torque[0]) + ", f2:" + str(self.finger_torque[1]))
         while (
@@ -309,10 +321,6 @@ def main():
         print("Move Interface")
         input("Press 'Enter' to start.")  # initialize
 
-        # Set Input
-        pick_position = [0.00872663, 0.155709, 0.337611]
-        place_position = [0.01572663, 0.265686, 0.338046]
-
         # Orientation set
         (ox, oy, oz, ow) = quaternion_from_euler(
             deg_to_rad(-180), deg_to_rad(0), deg_to_rad(-90)
@@ -331,6 +339,7 @@ def main():
             ow,
         ]
         ntlab.cobotta_execute_pose_goal(position, True)
+        print("Execute [STANDBY] Position")
         (roll, pitch, yaw) = euler_from_pose(ntlab.move_group.get_current_pose().pose)
         print(
             "roll:"
@@ -357,6 +366,7 @@ def main():
             oz,
             ow,
         ]
+        print("Execute [GRIP] Position")
         ntlab.cobotta_execute_pose_goal(position, True)
         (roll, pitch, yaw) = euler_from_pose(ntlab.move_group.get_current_pose().pose)
         print(
@@ -374,25 +384,25 @@ def main():
         input("Press 'Enter' to next.")
 
         # rospy.sleep(0.5) # rotate
+        # TODO: dynamic value, height following the object height
         position = [
             0.00872663,
             0.188509,
-            0.391929,
+            pick_position[2] + (object_height / 2),
             ox,
             oy,
             oz,
             ow,
         ]
-
-        ntlab.cobotta_execute_pose_goal(position, False)
-
-        rospy.sleep(1.5)  # current pos + rotate
+        print("Execute [ROTATE] Position")
+        ntlab.cobotta_execute_pose_goal(position, True)
+        # rospy.sleep(1.5)  # current pos + rotate
         gripper_pos = to_list(ntlab.current_gripper_pose)
         gripper_pos[4] = 3.14  # rotate
         ntlab.gripper_set_pose(gripper_pos, 10)
         # ntlab.gripperExecute()
         ntlab.gripper_execute_and_wait(gripper_pos, 10)
-        ntlab.cobotta_wait_execution(list_to_pose(position), 10)
+        # ntlab.cobotta_wait_execution(list_to_pose(position), 10)
         (roll, pitch, yaw) = euler_from_pose(ntlab.move_group.get_current_pose().pose)
         print(
             "roll:"
@@ -413,6 +423,7 @@ def main():
             oz,
             ow,
         ]
+        print("Execute [PLACE] Position")
         ntlab.cobotta_execute_pose_goal(position, True)
         (roll, pitch, yaw) = euler_from_pose(ntlab.move_group.get_current_pose().pose)
         print(
@@ -444,14 +455,15 @@ def main():
 
         # or arm going up
         position = [
-            0.00872663,
-            0.260686,
-            0.360046,
+            place_position[0],
+            place_position[1],
+            place_position[2] + 0.01,
             ox,
             oy,
             oz,
             ow,
         ]
+        print("Execute [SLIGHTLY UP] Position")
         ntlab.cobotta_execute_pose_goal(position, True)
         (roll, pitch, yaw) = euler_from_pose(ntlab.move_group.get_current_pose().pose)
         print(
@@ -473,6 +485,7 @@ def main():
             oz,
             ow,
         ]
+        print("Back to [STANDBY] Position")
         ntlab.cobotta_execute_pose_goal(position, False)
 
         rospy.sleep(1)  # standby
@@ -491,7 +504,7 @@ def main():
             + str(rad_to_deg(yaw))
         )
 
-        input("Press 'Enter' to end.")
+        # input("Press 'Enter' to end.")
 
     except rospy.ROSInterruptException:
         print("error")
