@@ -15,12 +15,17 @@ from tf.transformations import euler_from_quaternion, quaternion_from_euler
 
 # define parameter ---------------------------------------------
 
+length = [0.1453, 0.09945, 0.06687, 0.06171, 0.05203, 0.05, 0.04248, 0.05203]
+weight = [0.023, 0.011, 0.008, 0.007, 0.004, 0.003, 0.002, 0.003]
+
+object_num = 8
+
 # Set as the actual object
-object_weight = 0.004 # in kg
-object_height = 0.05203 # in meter
+object_length = length[object_num - 1]  # in meter
+object_weight = weight[object_num - 1]  # in kg
 
 hand_offset_z = 0.030  # in meter
-limit_torque = 2 * object_weight + 0.019 # offset linear function
+limit_torque = 2 * object_weight + 0.023  # offset linear function
 
 # Set Input
 pick_position = [0.01072663, 0.155709, 0.337611]
@@ -322,6 +327,11 @@ def main():
         input("Press 'Enter' to start.")  # initialize
 
         # Orientation set
+        (pox, poy, poz, pow) = quaternion_from_euler(
+            deg_to_rad(-180), deg_to_rad(0), deg_to_rad(0)
+        )
+
+        # Orientation set
         (ox, oy, oz, ow) = quaternion_from_euler(
             deg_to_rad(-180), deg_to_rad(0), deg_to_rad(-90)
         )
@@ -361,10 +371,10 @@ def main():
             pick_position[0],
             pick_position[1],
             pick_position[2],
-            ox,
-            oy,
-            oz,
-            ow,
+            pox,
+            poy,
+            poz,
+            pow,
         ]
         print("Execute [GRIP] Position")
         ntlab.cobotta_execute_pose_goal(position, True)
@@ -384,11 +394,11 @@ def main():
         input("Press 'Enter' to next.")
 
         # rospy.sleep(0.5) # rotate
-        # TODO: dynamic value, height following the object height
+ 
         position = [
             0.00872663,
             0.188509,
-            pick_position[2] + (object_height / 2),
+            pick_position[2] + (object_length / 2),
             ox,
             oy,
             oz,
