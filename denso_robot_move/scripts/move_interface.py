@@ -1,3 +1,5 @@
+# V2 Gripper
+
 from __future__ import print_function
 
 import time
@@ -8,15 +10,18 @@ import moveit_msgs.msg
 import geometry_msgs.msg
 
 from sensor_msgs.msg import JointState
+from geometry_msgs.msg import Pose
 from gripper_ntlab_controller.msg import CartesianPosition
 from math import pi, tau, dist, fabs, cos
 from moveit_commander.conversions import pose_to_list
 from tf.transformations import euler_from_quaternion, quaternion_from_euler
 
 # define parameter ---------------------------------------------
+USE_COBOTTA = False
 
 length = [0.1453, 0.09945, 0.06687, 0.06171, 0.05203, 0.05, 0.04248, 0.05203]
-weight = [0.023, 0.011, 0.008, 0.007, 0.004, 0.003, 0.002, 0.003]
+#weight = [0.023, 0.011, 0.008, 0.007, 0.004, 0.003, 0.002, 0.003]
+weight = [0.032, 0.011, 0.008, 0.007, 0.004, 0.003, 0.002, 0.003]
 
 object_num = 8
 
@@ -76,8 +81,10 @@ class GripperNTLab(object):
     gripper_pose = CartesianPosition()
     current_gripper_pose = CartesianPosition()
 
-    def __init__(self) -> None:
-
+    def __init__(self, use_cobotta) -> None:
+        """
+        use_cobotta: (True/False) Use Cobotta as a real manipulator robot or just skip it to only move the gripper.
+        """
         # Initialization -----
         super(GripperNTLab, self).__init__()
         moveit_commander.roscpp_initialize(sys.argv)
@@ -98,14 +105,18 @@ class GripperNTLab(object):
             self.gripper_cartesian_position_callback,
         )
 
-        robot = moveit_commander.RobotCommander()
-        scene = moveit_commander.PlanningSceneInterface()
+        robot = moveit_commander.RobotCommander() if use_cobotta else None
+        scene = moveit_commander.PlanningSceneInterface() if use_cobotta else None
 
         group_name = "arm"
-        move_group = moveit_commander.MoveGroupCommander(group_name)
+        move_group = (
+            moveit_commander.MoveGroupCommander(group_name) if use_cobotta else None
+        )
 
-        move_group.set_max_velocity_scaling_factor(0.9)
-        move_group.set_max_acceleration_scaling_factor(0.9)
+        # set initial parameter for manipulator robot
+        if use_cobotta:
+            move_group.set_max_velocity_scaling_factor(0.9)
+            move_group.set_max_acceleration_scaling_factor(0.9)
 
         display_trajectory_publisher = rospy.Publisher(
             "/move_group/display_planned_path",
@@ -113,27 +124,31 @@ class GripperNTLab(object):
             queue_size=20,
         )
 
-        planning_frame = move_group.get_planning_frame()
+        print("============ Use Cobotta: %s" % use_cobotta)
+
+        planning_frame = move_group.get_planning_frame() if use_cobotta else None
         print("============ Planning frame: %s" % planning_frame)
 
         # We can also print the name of the end-effector link for this group:
-        eef_link = move_group.get_end_effector_link()
+        eef_link = move_group.get_end_effector_link() if use_cobotta else None
         print("============ End effector link: %s" % eef_link)
 
         # We can get a list of all the groups in the robot:
-        group_names = robot.get_group_names()
-        print("============ Available Planning Groups:", robot.get_group_names())
+        group_names = robot.get_group_names() if use_cobotta else None
+        print("============ Available Planning Groups:", group_names)
 
         # Sometimes for debugging it is useful to print the entire state of the
         # robot:
+        robot_current_state = robot.get_current_state() if use_cobotta else None
         print("============ Printing robot state")
-        print(robot.get_current_state())
+        print(robot_current_state)
         print("")
 
         self.box_name = ""
         self.robot = robot
         self.scene = scene
         self.move_group = move_group
+        self.use_cobotta = use_cobotta
         self.display_trajectory_publisher = display_trajectory_publisher
         self.planning_frame = planning_frame
         self.eef_link = eef_link
@@ -142,32 +157,37 @@ class GripperNTLab(object):
         self.finger_torque = [0, 0]
 
     def cobotta_execute_pose_goal(self, position, wait):
+        if self.use_cobotta:
+            move_group = self.move_group
 
-        move_group = self.move_group
+            pose_goal = list_to_pose(position)
 
-        pose_goal = list_to_pose(position)
+            move_group.set_pose_target(pose_goal)
 
-        move_group.set_pose_target(pose_goal)
+            # call planner to execute
+            move_group.go(wait=wait)
+            # Calling `stop()` ensures that there is no residual movement
+            move_group.stop()
+            # It is always good to clear your targets after planning with poses.
+            # Note: there is no equivalent function for clear_joint_value_targets()
+            move_group.clear_pose_targets()
 
-        # call planner to execute
-        move_group.go(wait=wait)
-        # Calling `stop()` ensures that there is no residual movement
-        move_group.stop()
-        # It is always good to clear your targets after planning with poses.
-        # Note: there is no equivalent function for clear_joint_value_targets()
-        move_group.clear_pose_targets()
-
-        current_pose = self.move_group.get_current_pose().pose
-        return all_close(pose_goal, current_pose, 0.01)
+            current_pose = self.move_group.get_current_pose().pose
+            return all_close(pose_goal, current_pose, 0.01)
+        else:
+            return True
 
     def cobotta_wait_execution(self, position, timeout):  # timeout in (s)
-        start = time.time()
-        ret = False
-        while time.time() < start + timeout and not ret:
-            current_pose = self.move_group.get_current_pose().pose
-            ret = all_close(position, current_pose, 0.01)
-            rospy.sleep(0.01)
-        return ret
+        if self.use_cobotta:
+            start = time.time()
+            ret = False
+            while time.time() < start + timeout and not ret:
+                current_pose = self.move_group.get_current_pose().pose
+                ret = all_close(position, current_pose, 0.01)
+                rospy.sleep(0.01)
+            return ret
+        else:
+            return True
 
     def gripper_execute_and_wait(self, position, timeout):  # timeout in (s)
         start = time.time()
@@ -244,6 +264,12 @@ class GripperNTLab(object):
             self.gripper_execute()
             rospy.sleep(0.01)
 
+    def get_current_pose(self):
+        if self.use_cobotta:
+            return self.move_group.get_current_pose().pose
+        else:
+            return Pose()
+
 
 def to_list(param):
     if type(param) == type(CartesianPosition()):
@@ -302,16 +328,6 @@ def euler_from_pose(param):
     return euler_from_quaternion(quaternion_list)
 
 
-def euler_from_pose(param):
-    quaternion_list = [
-        param.orientation.x,
-        param.orientation.y,
-        param.orientation.z,
-        param.orientation.w,
-    ]
-    return euler_from_quaternion(quaternion_list)
-
-
 def rad_to_deg(rad):
     return rad * 180 / pi
 
@@ -328,7 +344,7 @@ def main():
 
         # Orientation set
         (pox, poy, poz, pow) = quaternion_from_euler(
-            deg_to_rad(-180), deg_to_rad(0), deg_to_rad(0)
+            deg_to_rad(-180), deg_to_rad(0), deg_to_rad(-90)
         )
 
         # Orientation set
@@ -336,7 +352,7 @@ def main():
             deg_to_rad(-180), deg_to_rad(0), deg_to_rad(-90)
         )
 
-        ntlab = GripperNTLab()
+        ntlab = GripperNTLab(USE_COBOTTA)
         print(to_list(ntlab.current_gripper_pose))
         # rospy.sleep(0.5)  # input("Press 'Enter' to start.")  # standby
         position = [
@@ -350,7 +366,7 @@ def main():
         ]
         ntlab.cobotta_execute_pose_goal(position, True)
         print("Execute [STANDBY] Position")
-        (roll, pitch, yaw) = euler_from_pose(ntlab.move_group.get_current_pose().pose)
+        (roll, pitch, yaw) = euler_from_pose(ntlab.get_current_pose())
         print(
             "roll:"
             + str(rad_to_deg(roll))
@@ -361,7 +377,7 @@ def main():
         )
 
         # rospy.sleep(0.5)  # input("Press 'Enter' to next.")
-        gripper_pos = [0.22, -0.045, 0.22, 0.045, 0]
+        gripper_pos = [0.286, -0.065, 0.286, 0.065, 0]
         ntlab.gripper_set_pose(gripper_pos, 3)
         # ntlab.gripperExecute()
         ntlab.gripper_execute_and_wait(gripper_pos, 10)
@@ -378,7 +394,7 @@ def main():
         ]
         print("Execute [GRIP] Position")
         ntlab.cobotta_execute_pose_goal(position, True)
-        (roll, pitch, yaw) = euler_from_pose(ntlab.move_group.get_current_pose().pose)
+        (roll, pitch, yaw) = euler_from_pose(ntlab.get_current_pose())
         print(
             "roll:"
             + str(rad_to_deg(roll))
@@ -394,7 +410,7 @@ def main():
         input("Press 'Enter' to next.")
 
         # rospy.sleep(0.5) # rotate
- 
+
         position = [
             0.00872663,
             0.188509,
@@ -413,7 +429,7 @@ def main():
         # ntlab.gripperExecute()
         ntlab.gripper_execute_and_wait(gripper_pos, 10)
         # ntlab.cobotta_wait_execution(list_to_pose(position), 10)
-        (roll, pitch, yaw) = euler_from_pose(ntlab.move_group.get_current_pose().pose)
+        (roll, pitch, yaw) = euler_from_pose(ntlab.get_current_pose())
         print(
             "roll:"
             + str(rad_to_deg(roll))
@@ -435,7 +451,7 @@ def main():
         ]
         print("Execute [PLACE] Position")
         ntlab.cobotta_execute_pose_goal(position, True)
-        (roll, pitch, yaw) = euler_from_pose(ntlab.move_group.get_current_pose().pose)
+        (roll, pitch, yaw) = euler_from_pose(ntlab.get_current_pose())
         print(
             "roll:"
             + str(rad_to_deg(roll))
@@ -445,17 +461,17 @@ def main():
             + str(rad_to_deg(yaw))
         )
 
-        input("Press 'Enter' to next.")
+        # input("Press 'Enter' to next.")
         # current pos + open slightly + finger up todo
 
         # slightly open
         gripper_pos = to_list(ntlab.gripper_pose)
-        gripper_pos[1] -= 0.015
-        gripper_pos[3] += 0.015
+        gripper_pos[1] -= 0.03
+        gripper_pos[3] += 0.03
         ntlab.gripper_set_pose(gripper_pos, 3)
         ntlab.gripper_execute_and_wait(gripper_pos, 10)
         # ntlab.gripper_release(0.02)
-        input("Press 'Enter' to next.")
+        # input("Press 'Enter' to next.")
         # finger slightly up
         # gripper_pos = to_list(ntlab.gripper_pose)
         # gripper_pos[0] -= 0.02
@@ -475,7 +491,7 @@ def main():
         ]
         print("Execute [SLIGHTLY UP] Position")
         ntlab.cobotta_execute_pose_goal(position, True)
-        (roll, pitch, yaw) = euler_from_pose(ntlab.move_group.get_current_pose().pose)
+        (roll, pitch, yaw) = euler_from_pose(ntlab.get_current_pose())
         print(
             "roll:"
             + str(rad_to_deg(roll))
@@ -499,12 +515,12 @@ def main():
         ntlab.cobotta_execute_pose_goal(position, False)
 
         rospy.sleep(1)  # standby
-        gripper_pos = [0.19, -0.06, 0.19, 0.06, 0]
+        gripper_pos = [0.28, -0.065, 0.28, 0.065, 0]
         ntlab.gripper_set_pose(gripper_pos, 3)
         # ntlab.gripperExecute()
         ntlab.gripper_execute_and_wait(gripper_pos, 10)
         ntlab.cobotta_wait_execution(list_to_pose(position), 10)
-        (roll, pitch, yaw) = euler_from_pose(ntlab.move_group.get_current_pose().pose)
+        (roll, pitch, yaw) = euler_from_pose(ntlab.get_current_pose())
         print(
             "roll:"
             + str(rad_to_deg(roll))
