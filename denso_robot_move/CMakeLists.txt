@@ -1,8 +1,7 @@
-cmake_minimum_required(VERSION 2.8.3)
+cmake_minimum_required(VERSION 3.0.2)
 project(denso_robot_move)
 
-set(CMAKE_CXX_STANDARD 14)
-set(CMAKE_CXX_EXTENSIONS OFF)
+add_compile_options(-std=c++11)
 
 find_package(catkin REQUIRED
   COMPONENTS
@@ -35,6 +34,7 @@ catkin_package(
     moveit_ros_planning_interface
     interactive_markers
     tf2_geometry_msgs
+    gripper_ntlab_controller
   DEPENDS
     EIGEN3
 )
@@ -68,23 +68,6 @@ install(TARGETS move_group_in_hand_manipulation DESTINATION ${CATKIN_PACKAGE_BIN
 add_executable(move_group_interface_two_points src/move_group_interface_two_points.cpp)
 target_link_libraries(move_group_interface_two_points ${catkin_LIBRARIES} ${Boost_LIBRARIES})
 install(TARGETS move_group_interface_two_points DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION})
-
-add_executable(move_group_interface_sequential src/move_group_interface_sequential.cpp)
-target_link_libraries(move_group_interface_sequential ${catkin_LIBRARIES} ${Boost_LIBRARIES})
-install(TARGETS move_group_interface_sequential DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION})
-
-add_executable(move_group_interface src/move_group_interface.cpp)
-target_link_libraries(move_group_interface ${catkin_LIBRARIES} ${Boost_LIBRARIES})
-install(TARGETS move_group_interface DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION})
-
-add_executable(move_group_motion_planning src/move_group_motion_planning.cpp)
-target_link_libraries(move_group_motion_planning ${catkin_LIBRARIES} ${Boost_LIBRARIES})
-install(TARGETS move_group_motion_planning DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION})
-
-add_executable(move_gripper src/move_gripper.cpp)
-target_link_libraries(move_gripper ${catkin_LIBRARIES} ${Boost_LIBRARIES})
-install(TARGETS move_gripper DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION})
-
 
 catkin_install_python(PROGRAMS
   scripts/move_interface.py

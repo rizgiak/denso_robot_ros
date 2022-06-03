@@ -30,11 +30,12 @@ object_length = length[object_num - 1]  # in meter
 object_weight = weight[object_num - 1]  # in kg
 
 hand_offset_z = 0.030  # in meter
-limit_torque = 2 * object_weight + 0.023  # offset linear function
+limit_torque = 2 * object_weight + 0.027  # offset linear function
 
 # Set Input
 pick_position = [0.01072663, 0.155709, 0.337611]
 place_position = [0.01572663, 0.268686, 0.338046]
+standby_pos = [0.244, -0.065, 0.244, 0.065, 0]
 
 ################################################################
 
@@ -354,7 +355,7 @@ def main():
 
         ntlab = GripperNTLab(USE_COBOTTA)
         print(to_list(ntlab.current_gripper_pose))
-        # rospy.sleep(0.5)  # input("Press 'Enter' to start.")  # standby
+        rospy.sleep(0.5)  # input("Press 'Enter' to start.")  # standby
         position = [
             pick_position[0],
             pick_position[1],
@@ -376,13 +377,15 @@ def main():
             + str(rad_to_deg(yaw))
         )
 
-        # rospy.sleep(0.5)  # input("Press 'Enter' to next.")
-        gripper_pos = [0.286, -0.065, 0.286, 0.065, 0]
+        # rospy.sleep(0.5)  
+        # input("Press 'Enter' to next.")
+        gripper_pos = standby_pos
         ntlab.gripper_set_pose(gripper_pos, 3)
         # ntlab.gripperExecute()
         ntlab.gripper_execute_and_wait(gripper_pos, 10)
         print("standby z:" + str(position[2] + gripper_pos[0] + hand_offset_z))
         # rospy.sleep(0.5) # grip
+        # input("Press 'Enter' to next.")
         position = [
             pick_position[0],
             pick_position[1],
@@ -515,7 +518,7 @@ def main():
         ntlab.cobotta_execute_pose_goal(position, False)
 
         rospy.sleep(1)  # standby
-        gripper_pos = [0.28, -0.065, 0.28, 0.065, 0]
+        gripper_pos = standby_pos
         ntlab.gripper_set_pose(gripper_pos, 3)
         # ntlab.gripperExecute()
         ntlab.gripper_execute_and_wait(gripper_pos, 10)
