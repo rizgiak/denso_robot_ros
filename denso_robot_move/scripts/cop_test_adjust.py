@@ -11,7 +11,7 @@ import moveit_msgs.msg
 import geometry_msgs.msg
 
 from sensor_msgs.msg import JointState
-from geometry_msgs.msg import Pose
+from geometry_msgs.msg import Pose, Point32
 from gripper_ntlab_controller.msg import CartesianPosition
 from math import pi, tau, dist, fabs, cos
 from moveit_commander.conversions import pose_to_list
@@ -74,7 +74,9 @@ def all_close(goal, actual, tolerance):
         d2 = dist((ax2, ay2), (gx2, gy2))
         dist_angle = fabs(arad - grad)
         return d1 <= tolerance and d2 <= tolerance and dist_angle <= tolerance
-
+    else:
+        if abs(actual - goal) > tolerance:
+                return False
     return True
 
 
@@ -82,6 +84,8 @@ class GripperNTLab(object):
 
     gripper_pose = CartesianPosition()
     current_gripper_pose = CartesianPosition()
+    cop_left = Point32()
+    cop_right = Point32()
 
     def __init__(self, use_cobotta) -> None:
         """
@@ -97,7 +101,23 @@ class GripperNTLab(object):
             "cobotta/hand_set_cartesian", CartesianPosition, queue_size=10
         )
 
+        cop_left_hand_pub = rospy.Publisher(
+            "/cop_left_hand", Point32, queue_size=10
+        )
+
+        cop_right_hand_pub = rospy.Publisher(
+            "/cop_right_hand", Point32, queue_size=10
+        )
+
         # Subscriber ----
+        rospy.Subscriber(
+            "/cop_left", Point32, self.cop_left_callback
+        )
+
+        rospy.Subscriber(
+            "/cop_right", Point32, self.cop_right_callback
+        )
+        
         rospy.Subscriber(
             "cobotta/all_joint_states", JointState, self.joint_state_callback
         )
@@ -156,6 +176,8 @@ class GripperNTLab(object):
         self.eef_link = eef_link
         self.group_names = group_names
         self.gripper_pub = gripper_pub
+        self.cop_left_hand_pub =cop_left_hand_pub
+        self.cop_right_hand_pub =cop_right_hand_pub
         self.finger_torque = [0, 0]
 
     def cobotta_execute_pose_goal(self, position, wait):
@@ -200,6 +222,18 @@ class GripperNTLab(object):
             ret = all_close(self.gripper_pose, current_pose, 0.01)
             rospy.sleep(0.2)
         return ret
+
+    def cop_left_callback(self, data):
+        self.cop_left.x = data.x
+        self.cop_left.y = data.y + self.current_gripper_pose.y1
+        self.cop_left.z = data.z
+        self.cop_left_hand_pub.publish(self.cop_left)
+
+    def cop_right_callback(self, data):
+        self.cop_right.x = data.x
+        self.cop_right.y = data.y + self.current_gripper_pose.y2
+        self.cop_right.z = data.z
+        self.cop_right_hand_pub.publish(self.cop_right)
 
     def joint_state_callback(self, data):
         i = 0
@@ -270,7 +304,12 @@ class GripperNTLab(object):
                     gripper_position[2] += 0.0001
                     self.gripper_set_pose(gripper_position, 0)
                     self.gripper_execute()
-                    rospy.sleep(0.01)
+                    rospy.sleep(0.05)
+                    if(all_close(self.cop_left.y,self.cop_right.y,0.1)):
+                        print("goal")
+                        i= i_max
+                        break
+                        
                 direction = False
             else:
                 while gripper_position[0] < limit_max:
@@ -278,7 +317,11 @@ class GripperNTLab(object):
                     gripper_position[2] -= 0.0001
                     self.gripper_set_pose(gripper_position, 0)
                     self.gripper_execute()
-                    rospy.sleep(0.01)
+                    rospy.sleep(0.05)
+                    if(all_close(self.cop_left.y,self.cop_right.y,0.1)):
+                        print("goal")
+                        i= i_max
+                        break
                 direction = True
             i += 1
 
@@ -472,12 +515,23 @@ def main():
 
         #move up and down to analyze the cop measurement
         ntlab.gripper_move_up_and_down(0.005)
+        # input("Press 'Enter' to next.")
 
         rospy.sleep(0.5)
         #set to grasp position
-        ntlab.gripper_set_pose(last_pos, 3)
+        # ntlab.gripper_set_pose(last_pos, 3)
+        # if not ntlab.gripper_execute_and_wait(10):
+        #     abort_execution("Couldn't execute, gripper_execute_and_wait")
+
+        # rotate
+        rospy.sleep(2.5)  # current pos + rotate
+        gripper_pos = to_list(ntlab.current_gripper_pose)
+        gripper_pos[4] = 3.14  # rotate
+        ntlab.gripper_set_pose(gripper_pos, 10)
+
         if not ntlab.gripper_execute_and_wait(10):
-            abort_execution("Couldn't execute, gripper_execute_and_wait")
+            abort_execution("Could execute, gripper_execute_and_wait")
+
 
         # ntlab.cobotta_wait_execution(list_to_pose(position), 10)
 
