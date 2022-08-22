@@ -10,8 +10,9 @@ import moveit_commander
 import moveit_msgs.msg
 import geometry_msgs.msg
 
+from std_msgs.msg import Float32
 from sensor_msgs.msg import JointState
-from geometry_msgs.msg import Pose
+from geometry_msgs.msg import Pose, Point32
 from gripper_ntlab_controller.msg import CartesianPosition
 from math import pi, tau, dist, fabs, cos
 from moveit_commander.conversions import pose_to_list
@@ -24,7 +25,7 @@ length = [0.1453, 0.09945, 0.06687, 0.06171, 0.05203, 0.05, 0.04248, 0.05203]
 # weight = [0.023, 0.011, 0.008, 0.007, 0.004, 0.003, 0.002, 0.003]
 weight = [0.023, 0.011, 0.008, 0.007, 0.004, 0.003, 0.002, 0.003]
 
-object_num = 2
+object_num = 1
 
 # Set as the actual object
 object_length = length[object_num - 1]  # in meter
@@ -74,7 +75,9 @@ def all_close(goal, actual, tolerance):
         d2 = dist((ax2, ay2), (gx2, gy2))
         dist_angle = fabs(arad - grad)
         return d1 <= tolerance and d2 <= tolerance and dist_angle <= tolerance
-
+    else:
+        if abs(actual - goal) > tolerance:
+                return False
     return True
 
 
@@ -82,6 +85,10 @@ class GripperNTLab(object):
 
     gripper_pose = CartesianPosition()
     current_gripper_pose = CartesianPosition()
+    cop_left = Point32()
+    cop_right = Point32()
+    pressure_left = 0.0
+    pressure_right = 0.0
 
     def __init__(self, use_cobotta) -> None:
         """
@@ -97,7 +104,31 @@ class GripperNTLab(object):
             "cobotta/hand_set_cartesian", CartesianPosition, queue_size=10
         )
 
+        cop_left_hand_pub = rospy.Publisher(
+            "/cop_left_hand", Point32, queue_size=10
+        )
+
+        cop_right_hand_pub = rospy.Publisher(
+            "/cop_right_hand", Point32, queue_size=10
+        )
+
         # Subscriber ----
+        rospy.Subscriber(
+            "/cop_left", Point32, self.cop_left_callback
+        )
+
+        rospy.Subscriber(
+            "/cop_right", Point32, self.cop_right_callback
+        )
+
+        rospy.Subscriber(
+            "/pressure_left", Float32, self.pressure_left_callback
+        )
+
+        rospy.Subscriber(
+            "/pressure_right", Float32, self.pressure_right_callback
+        )
+        
         rospy.Subscriber(
             "cobotta/all_joint_states", JointState, self.joint_state_callback
         )
@@ -156,6 +187,8 @@ class GripperNTLab(object):
         self.eef_link = eef_link
         self.group_names = group_names
         self.gripper_pub = gripper_pub
+        self.cop_left_hand_pub =cop_left_hand_pub
+        self.cop_right_hand_pub =cop_right_hand_pub
         self.finger_torque = [0, 0]
 
     def cobotta_execute_pose_goal(self, position, wait):
@@ -201,6 +234,24 @@ class GripperNTLab(object):
             rospy.sleep(0.2)
         return ret
 
+    def pressure_left_callback(self, data):
+        self.pressure_left = data.data
+
+    def pressure_right_callback(self, data):
+        self.pressure_right = data.data
+
+    def cop_left_callback(self, data):
+        self.cop_left.x = data.x
+        self.cop_left.y = data.y - (self.current_gripper_pose.x1 - standby_pos[0]) * 1000
+        self.cop_left.z = data.z
+        self.cop_left_hand_pub.publish(self.cop_left)
+
+    def cop_right_callback(self, data):
+        self.cop_right.x = data.x
+        self.cop_right.y = data.y - (self.current_gripper_pose.x2 - standby_pos[2]) * 1000
+        self.cop_right.z = data.z
+        self.cop_right_hand_pub.publish(self.cop_right)
+
     def joint_state_callback(self, data):
         i = 0
         f1, f2 = (0, 0)
@@ -244,6 +295,27 @@ class GripperNTLab(object):
             and self.finger_torque[1] <= limit_torque
             and self.finger_torque[1] >= -limit_torque
         ):
+            print(str(self.pressure_left) + " " + str(self.pressure_right))
+            gripper_position[1] += 0.0001
+            gripper_position[3] -= 0.0001
+            self.gripper_set_pose(gripper_position, 0)
+            self.gripper_execute()
+            # print(
+            #     "res f1:"
+            #     + str(self.finger_torque[0])
+            #     + ", f2:"
+            #     + str(self.finger_torque[1])
+            # )
+            rospy.sleep(0.01)
+    
+    def gripper_grip_limit_pressure(self):
+        gripper_position = to_list(self.current_gripper_pose)
+        # print("f1:" + str(self.finger_torque[0]) + ", f2:" + str(self.finger_torque[1]))
+        limit_pressure = 2.5
+        while (
+            self.pressure_left <= limit_pressure
+            and self.pressure_right <= limit_pressure
+        ):
             gripper_position[1] += 0.0001
             gripper_position[3] -= 0.0001
             self.gripper_set_pose(gripper_position, 0)
@@ -260,7 +332,7 @@ class GripperNTLab(object):
         gripper_position = to_list(self.current_gripper_pose)
         direction = True
         i = 0
-        i_max = 6
+        i_max = 1
         limit_min = gripper_position[0] - offset
         limit_max = gripper_position[0] + offset
         while i < i_max:
@@ -449,7 +521,7 @@ def main():
         )
 
         # rospy.sleep(0.5)
-        ntlab.gripper_grip_limit_torque()
+        ntlab.gripper_grip_limit_pressure()
         last_pos = to_list(ntlab.current_gripper_pose)
 
         input("Press 'Enter' to next.")
@@ -471,13 +543,24 @@ def main():
             abort_execution("Couldn't execute, cobotta_execute_pose_goal")
 
         #move up and down to analyze the cop measurement
-        ntlab.gripper_move_up_and_down(0.005)
+        # ntlab.gripper_move_up_and_down(0.01)
+        # input("Press 'Enter' to next.")
 
         rospy.sleep(0.5)
         #set to grasp position
-        ntlab.gripper_set_pose(last_pos, 3)
+        # ntlab.gripper_set_pose(last_pos, 3)
+        # if not ntlab.gripper_execute_and_wait(10):
+        #     abort_execution("Couldn't execute, gripper_execute_and_wait")
+
+        # rotate
+        rospy.sleep(2.5)  # current pos + rotate
+        gripper_pos = to_list(ntlab.current_gripper_pose)
+        gripper_pos[4] = 3.14  # rotate
+        ntlab.gripper_set_pose(gripper_pos, 10)
+
         if not ntlab.gripper_execute_and_wait(10):
-            abort_execution("Couldn't execute, gripper_execute_and_wait")
+            abort_execution("Could execute, gripper_execute_and_wait")
+
 
         # ntlab.cobotta_wait_execution(list_to_pose(position), 10)
 
@@ -522,8 +605,8 @@ def main():
 
         # slightly open
         gripper_pos = to_list(ntlab.current_gripper_pose)
-        gripper_pos[1] -= 0.03
-        gripper_pos[3] += 0.03
+        gripper_pos[1] -= 0.01
+        gripper_pos[3] += 0.01
         ntlab.gripper_set_pose(gripper_pos, 3)
 
         if not ntlab.gripper_execute_and_wait(10):

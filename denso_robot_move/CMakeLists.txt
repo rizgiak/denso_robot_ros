@@ -73,6 +73,7 @@ catkin_install_python(PROGRAMS
   scripts/GripperNTLab.py
   scripts/move_interface.py
   scripts/cop_test.py
+  scripts/cor_test.py
   scripts/cop_test_adjust.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
