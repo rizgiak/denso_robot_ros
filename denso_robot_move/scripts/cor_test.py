@@ -22,7 +22,6 @@ USE_COBOTTA = True
 WITH_COR = False         # center of rotation adjustment
 AUTO_ = True            # make the sequence run automatically, used in end_func()
 sleep_time = 1.0        # sleep for AUTO_
-init_finished = False
 
 length = [0.1453, 0.09945, 0.06687, 0.06171, 0.05203, 0.05, 0.04248, 0.05203]
 weight = [0.023, 0.011, 0.008, 0.007, 0.004, 0.003, 0.002, 0.003]
@@ -90,6 +89,7 @@ class GripperNTLab(object):
     cop_right = Point32()
     pressure_left = 0.0
     pressure_right = 0.0
+    init_finished = False
 
     def __init__(self, use_cobotta) -> None:
         """
@@ -245,14 +245,14 @@ class GripperNTLab(object):
         self.cop_left.x = data.x
         self.cop_left.y = data.y - (self.current_gripper_pose.x1 - standby_pos[0]) * 1000
         self.cop_left.z = data.z
-        if init_finished:
+        if self.init_finished:
             self.cop_left_hand_pub.publish(self.cop_left)
 
     def cop_right_callback(self, data):
         self.cop_right.x = data.x
         self.cop_right.y = data.y - (self.current_gripper_pose.x2 - standby_pos[2]) * 1000
         self.cop_right.z = data.z
-        if init_finished:
+        if self.init_finished:
             self.cop_right_hand_pub.publish(self.cop_right)
 
     def joint_state_callback(self, data):
@@ -467,7 +467,7 @@ def main():
         print(to_list(ntlab.current_gripper_pose))
         rospy.sleep(0.5)
         input("Press 'Enter' to start.")  # standby
-        init_finished = True
+        ntlab.init_finished = True
         position = [
             pick_position[0],
             pick_position[1],
