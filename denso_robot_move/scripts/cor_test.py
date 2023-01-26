@@ -17,9 +17,15 @@ from math import pi, tau, dist, fabs, cos
 from moveit_commander.conversions import pose_to_list
 from tf.transformations import euler_from_quaternion, quaternion_from_euler
 
+# Enter F_total
+F_total = 1.59
+
+# generate pressure from Force----------------------------------
+pressure_each_finger = F_total*(4/1.96)/2 #F_total x (pressure to force param)/number of finger
+
 # define parameter ---------------------------------------------
 USE_COBOTTA = True
-WITH_COR = False         # center of rotation adjustment
+WITH_COR = True         # center of rotation adjustment
 AUTO_ = True            # make the sequence run automatically, used in end_func()
 sleep_time = 1.0        # sleep for AUTO_
 
@@ -314,7 +320,8 @@ class GripperNTLab(object):
     def gripper_grip_limit_pressure(self):
         gripper_position = to_list(self.current_gripper_pose)
         # print("f1:" + str(self.finger_torque[0]) + ", f2:" + str(self.finger_torque[1]))
-        limit_pressure = 2.5
+        limit_pressure = pressure_each_finger
+
         while (
             self.pressure_left <= limit_pressure
             and self.pressure_right <= limit_pressure
