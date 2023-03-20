@@ -11,7 +11,7 @@ For COBOTTA Robot Standard Type (Not OSS).
 The most updated version in [noetic-devel](https://github.com/rizgiak/denso_robot_ros/tree/noetic-devel) branch.
 
 
-Install moveit library
+### Install moveit library
 ```
 cd denso_ws/src/
 wstool init .
@@ -20,8 +20,20 @@ wstool remove  moveit_tutorials  # this is cloned in the next section
 wstool update -t .
 ```
 
-Install additional library
+### Install additional library
 ```
 sudo apt-get install ros-noetic-ruckig
 ```
 
+### Clone repo inside `/src`
+```
+git clone https://github.com/rizgiak/denso_robot_ros.git
+git clone https://github.com/rizgiak/denso_cobotta_ros.git
+git clone https://github.com/rizgiak/gripper_ntlab.git
+git clone https://github.com/rizgiak/gripper_ntlab_arduino.git
+```
+
+### Build
+```
+catkin build
+```
