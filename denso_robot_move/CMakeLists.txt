@@ -70,7 +70,6 @@ target_link_libraries(move_group_interface_two_points ${catkin_LIBRARIES} ${Boos
 install(TARGETS move_group_interface_two_points DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION})
 
 catkin_install_python(PROGRAMS
-  scripts/GripperNTLab.py
   scripts/move_interface.py
   scripts/cop_test.py
   scripts/cor_test.py
