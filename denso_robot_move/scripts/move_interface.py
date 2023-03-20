@@ -11,7 +11,7 @@ import geometry_msgs.msg
 
 from sensor_msgs.msg import JointState
 from geometry_msgs.msg import Pose
-from gripper_ntlab_controller.msg import CartesianPosition
+from gripper_ntlab_msgs.msg import CartesianPosition
 from math import pi, tau, dist, fabs, cos
 from moveit_commander.conversions import pose_to_list
 from tf.transformations import euler_from_quaternion, quaternion_from_euler
