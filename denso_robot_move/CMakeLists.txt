@@ -20,6 +20,7 @@ find_package(catkin REQUIRED
     tf2_eigen
     tf2_geometry_msgs
     gripper_ntlab_controller
+    gripper_ntlab_msgs
 )
 
 find_package(Eigen3 REQUIRED)
@@ -35,6 +36,7 @@ catkin_package(
     interactive_markers
     tf2_geometry_msgs
     gripper_ntlab_controller
+    gripper_ntlab_msgs
   DEPENDS
     EIGEN3
 )

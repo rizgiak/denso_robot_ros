@@ -2,8 +2,8 @@
 // https://github.com/ros-planning/moveit_tutorials/blob/master/doc/move_group_interface/src/move_group_interface_tutorial.cpp
 // --------------------------------------------------
 
-#include <gripper_ntlab_controller/CartesianPosition.h>
-#include <gripper_ntlab_controller/JointPosition.h>
+#include <gripper_ntlab_msgs/CartesianPosition.h>
+#include <gripper_ntlab_msgs/JointPosition.h>
 #include <moveit/move_group_interface/move_group_interface.h>
 #include <moveit/planning_scene_interface/planning_scene_interface.h>
 #include <moveit_msgs/AttachedCollisionObject.h>
@@ -17,8 +17,8 @@
 double finger_torque[2] = {0};
 
 typedef std::map<std::string, std::vector<double>> Map;
-gripper_ntlab_controller::JointPosition gripper_joint_pos;
-gripper_ntlab_controller::CartesianPosition gripper_cartesian_pos;
+gripper_ntlab_msgs::JointPosition gripper_joint_pos;
+gripper_ntlab_msgs::CartesianPosition gripper_cartesian_pos;
 
 Map m, cobotta_pose;
 
@@ -39,7 +39,7 @@ void insertPosition() {
 }
 
 void gripperSetPose(std::vector<double> pos) {
-    gripper_ntlab_controller::CartesianPosition msg;
+    gripper_ntlab_msgs::CartesianPosition msg;
     msg.torque = true;
     msg.x1 = pos[0];
     msg.y1 = pos[1];
@@ -107,8 +107,8 @@ int main(int argc, char** argv) {
     ros::Rate rate(100);
 
     ros::Subscriber cobotta_joint_state = node_handle.subscribe("cobotta/all_joint_states", 10, cobottaJointSubCallback);
-    ros::Publisher gripper_pub = node_handle.advertise<gripper_ntlab_controller::JointPosition>("gripper_ntlab/set_position", 10);
-    ros::Publisher gripper_cartesian_pub = node_handle.advertise<gripper_ntlab_controller::CartesianPosition>("cobotta/hand_set_cartesian", 10);
+    ros::Publisher gripper_pub = node_handle.advertise<gripper_ntlab_msgs::JointPosition>("gripper_ntlab/set_position", 10);
+    ros::Publisher gripper_cartesian_pub = node_handle.advertise<gripper_ntlab_msgs::CartesianPosition>("cobotta/hand_set_cartesian", 10);
 
     ros::AsyncSpinner spinner(1);
     spinner.start();

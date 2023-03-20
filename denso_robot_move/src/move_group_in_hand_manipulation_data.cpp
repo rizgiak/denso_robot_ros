@@ -2,7 +2,7 @@
 // https://github.com/ros-planning/moveit_tutorials/blob/master/doc/move_group_interface/src/move_group_interface_tutorial.cpp
 // --------------------------------------------------
 
-#include <gripper_ntlab_controller/JointPosition.h>
+#include <gripper_ntlab_msgs/JointPosition.h>
 #include <moveit/move_group_interface/move_group_interface.h>
 #include <moveit/planning_scene_interface/planning_scene_interface.h>
 #include <moveit_msgs/AttachedCollisionObject.h>
@@ -14,7 +14,7 @@
 #define BUFFER_MESSAGE 10
 
 typedef std::map<std::string, std::vector<int>> Map;
-gripper_ntlab_controller::JointPosition gripper_joint_pos;
+gripper_ntlab_msgs::JointPosition gripper_joint_pos;
 
 Map m;
 
@@ -32,7 +32,7 @@ void insertPosition() {
 }
 
 void setPosition(std::vector<int> pos) {
-    gripper_ntlab_controller::JointPosition msg;
+    gripper_ntlab_msgs::JointPosition msg;
     msg.mode = 101;
     for (int i = 0; i < pos.size(); i++) {
         msg.position.push_back(pos[i]);
@@ -113,7 +113,7 @@ int main(int argc, char** argv) {
 
     ros::Rate rate(100);
 
-    ros::Publisher gripper_pub = node_handle.advertise<gripper_ntlab_controller::JointPosition>("gripper_ntlab/set_position", 10);
+    ros::Publisher gripper_pub = node_handle.advertise<gripper_ntlab_msgs::JointPosition>("gripper_ntlab/set_position", 10);
 
     ros::AsyncSpinner spinner(1);
     spinner.start();
